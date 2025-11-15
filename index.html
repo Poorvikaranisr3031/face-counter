@@ -1,319 +1,570 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta charset="utf-8">
-<title>Face Counter App – Login + Signup + Detection + Save + PDF</title>
+<meta charset="utf-8" />
+<title>Attendance Face Counter — Full App</title>
 
 <!-- face-api.js -->
 <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
-
-<!-- EXIF for rotation -->
+<!-- EXIF reader -->
 <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
-
-<!-- jsPDF for PDF download -->
+<!-- html2canvas & jsPDF for PDF export -->
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 <style>
-    body { background:#111; color:#fff; font-family:Arial; text-align:center; padding:20px; }
-    .box {
-        width:320px; margin:40px auto; padding:20px;
-        background:#222; border-radius:10px; box-shadow:0 0 10px #000;
-    }
-    input {
-        width:90%; padding:10px; margin:10px;
-        border-radius:5px; border:none; font-size:16px;
-    }
-    button {
-        padding:10px 16px; margin:6px; border-radius:6px;
-        border:none; cursor:pointer; background:#008cff; color:#fff;
-        font-size:16px;
-    }
-    #canvas, #previewImg {
-        border:2px solid #ccc; border-radius:10px; margin-top:10px;
-        max-width:95%;
-    }
-    #historyBox {
-        margin-top:20px;
-        text-align:left;
-        background:#222;
-        padding:12px;
-        border-radius:10px;
-        width:90%;
-        max-width:600px;
-        margin-left:auto; margin-right:auto;
-        max-height:250px;
-        overflow:auto;
-    }
-    .hidden { display:none; }
+  :root{--bg:#0f1113;--card:#111316;--accent:#00ff90;--muted:#bdbdbd}
+  body{margin:0;font-family:Inter,Arial,Helvetica,sans-serif;background:var(--bg);color:#fff}
+  .app{max-width:1100px;margin:18px auto;padding:18px}
+  header{display:flex;align-items:center;justify-content:space-between}
+  h1{font-size:20px;margin:0}
+  nav button{margin-left:8px;padding:8px 12px;border-radius:6px;border:none;cursor:pointer}
+  .card{background:var(--card);padding:12px;border-radius:10px;margin-top:12px}
+  input,button,select{font-size:14px}
+  .grid{display:grid;grid-template-columns:1fr 420px;gap:12px}
+  /* left column */
+  #left .controls{display:flex;gap:8px;flex-wrap:wrap}
+  #left button,input[type=file]{padding:8px 12px;border-radius:6px;border:none;cursor:pointer}
+  #canvas{width:100%;height:auto;border-radius:8px;border:2px solid #222;display:block}
+  #previewImg{max-width:100%;border-radius:8px;display:none}
+  #status{color:var(--muted);margin-top:8px}
+  #count{font-weight:700;color:var(--accent);margin-top:8px}
+  /* right column */
+  .right-block{display:flex;flex-direction:column;gap:8px}
+  label{display:block;margin:6px 0 4px 0;color:var(--muted)}
+  input[type=text],input[type=password]{width:100%;padding:8px;border-radius:6px;border:1px solid #333;background:#0b0b0b;color:#fff}
+  .history-list{max-height:380px;overflow:auto}
+  .hist-row{display:flex;align-items:center;gap:8px;padding:6px;border-radius:6px;border:1px solid #222;margin-bottom:8px}
+  .thumb{width:80px;height:60px;object-fit:cover;border-radius:6px}
+  .muted{color:var(--muted);font-size:13px}
+  footer{margin-top:18px;color:var(--muted);font-size:13px}
+  .hidden{display:none}
+  .top-bar{display:flex;gap:8px;align-items:center}
+  .btn{padding:8px 12px;border-radius:6px;border:none;cursor:pointer}
 </style>
 </head>
 <body>
+<div class="app">
+  <header>
+    <h1>Attendance Face Counter</h1>
+    <div class="top-bar">
+      <div id="userInfo" class="muted">Not logged in</div>
+      <div id="navBtns" class="hidden">
+        <button id="goDashboard" class="btn">Dashboard</button>
+        <button id="goHistory" class="btn">History</button>
+        <button id="logoutBtn" class="btn">Logout</button>
+      </div>
+    </div>
+  </header>
 
-<!-- SIGNUP BOX -->
-<div id="signupBox" class="box">
-    <h2>Signup</h2>
-    <input id="su_username" placeholder="Create username">
-    <input id="su_password" placeholder="Create password" type="password">
-    <button onclick="signup()">Signup</button>
-    <p>Already have an account? <a href="#" onclick="showLogin()">Login</a></p>
-</div>
+  <!-- LOGIN / REGISTER (shown when not logged in) -->
+  <div id="authCard" class="card">
+    <div style="display:flex;gap:12px">
+      <div style="flex:1">
+        <h3 style="margin-top:0">Login</h3>
+        <label>Username</label>
+        <input id="loginUser" type="text" placeholder="username">
+        <label>Password</label>
+        <input id="loginPass" type="password" placeholder="password">
+        <div style="margin-top:8px">
+          <button id="loginBtn" class="btn">Login</button>
+        </div>
+      </div>
 
-<!-- LOGIN BOX -->
-<div id="loginBox" class="box hidden">
-    <h2>Login</h2>
-    <input id="li_username" placeholder="Username">
-    <input id="li_password" placeholder="Password" type="password">
-    <button onclick="login()">Login</button>
-    <p>No account? <a href="#" onclick="showSignup()">Signup</a></p>
-</div>
+      <div style="width:320px">
+        <h3 style="margin-top:0">Register</h3>
+        <label>New username</label>
+        <input id="regUser" type="text" placeholder="username">
+        <label>New password</label>
+        <input id="regPass" type="password" placeholder="password">
+        <div style="margin-top:8px">
+          <button id="regBtn" class="btn">Register</button>
+        </div>
+      </div>
+    </div>
+    <div id="authMsg" class="muted" style="margin-top:10px"></div>
+  </div>
 
-<!-- MAIN APP -->
-<div id="app" class="hidden">
-
-    <h2>Welcome, <span id="userDisplay"></span></h2>
-    <button onclick="logout()" style="background:#ff4444">Logout</button>
-
-    <div class="controls">
-        <button onclick="startWebcam()">Start Webcam</button>
-        <button onclick="stopWebcam()">Stop Webcam</button>
-        <input id="upload" type="file" accept="image/*">
-        <button onclick="detectFromImage()">Detect Faces</button>
-        <button onclick="saveResult()">Save</button>
-        <button onclick="downloadPDF()">Download PDF</button>
+  <!-- MAIN APP (hidden until login) -->
+  <div id="mainApp" class="hidden">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <strong>Logged in as</strong> <span id="currentUser" class="muted"></span>
+        </div>
+        <div>
+          <button id="downloadAllPdf" class="btn">Download All History PDFs</button>
+          <button id="clearHistory" class="btn">Clear History</button>
+        </div>
+      </div>
     </div>
 
-    <img id="previewImg" class="hidden" />
-    <canvas id="canvas" width="640" height="480"></canvas>
+    <div class="grid">
+      <!-- LEFT: FACE COUNTER -->
+      <div id="left">
+        <div class="card">
+          <div class="controls">
+            <button id="startCamBtn" class="btn">Start Webcam</button>
+            <button id="stopCamBtn" class="btn">Stop Webcam</button>
+            <input id="fileInput" type="file" accept="image/*">
+            <button id="detectBtn" class="btn">Detect Faces in Photo</button>
+            <button id="saveAttendanceBtn" class="btn">Save Attendance</button>
+          </div>
 
-    <div id="countBox">Faces: 0</div>
+          <div style="margin-top:8px">
+            <canvas id="canvas" width="640" height="480"></canvas>
+            <img id="previewImg" style="display:none" alt="preview">
+            <div id="status" class="muted">Model loading...</div>
+            <div id="count">Faces: 0</div>
+          </div>
+        </div>
 
-    <h3>Saved History</h3>
-    <div id="historyBox"></div>
+        <div class="card">
+          <h3 style="margin:4px 0">PDF Export Options</h3>
+          <div class="muted">PDF will include: Face count + Image + Date & Time</div>
+          <div style="margin-top:8px">
+            <label>PDF Filename (prefix)</label>
+            <input id="pdfPrefix" type="text" placeholder="attendance" value="attendance">
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: History & Controls -->
+      <div class="card right-block">
+        <div>
+          <h3 style="margin:4px 0">Attendance History</h3>
+          <div class="muted">Saved locally on your browser (localStorage)</div>
+        </div>
+        <div class="history-list" id="historyList"></div>
+      </div>
+    </div>
+
+    <footer class="muted">Tip: Run with Live Server. Models load from CDN and need network.</footer>
+  </div>
 </div>
 
-
 <script>
-/* ---------------------- SIGNUP + LOGIN + LOGOUT ---------------------- */
+/* Full SPA single-file app
+ - Registration & login stored in localStorage under key 'afc_users'
+ - Logged-in username stored in sessionStorage 'afc_current_user'
+ - Attendance history stored in localStorage 'afc_history' as array of records:
+    { id, user, timestamp, count, filename, dataUrl }
+ - face-api.js SSD + Tiny fallback used, with tuned thresholds for accuracy
+ - EXIF rotation handled and we process actual rotated pixels into an offscreen canvas
+ - PDF generation via html2canvas + jsPDF
+*/
 
-function showSignup() {
-    document.getElementById("signupBox").classList.remove("hidden");
-    document.getElementById("loginBox").classList.add("hidden");
-}
-
-function showLogin() {
-    document.getElementById("loginBox").classList.remove("hidden");
-    document.getElementById("signupBox").classList.add("hidden");
-}
-
-function signup() {
-    let u = su_username.value.trim();
-    let p = su_password.value.trim();
-
-    if (u=="" || p=="") {
-        alert("Enter username & password");
-        return;
-    }
-
-    let users = JSON.parse(localStorage.getItem("users") || "{}");
-
-    if (users[u]) {
-        alert("Username already exists!");
-        return;
-    }
-
-    users[u] = p; // store password
-    localStorage.setItem("users", JSON.stringify(users));
-
-    alert("Signup successful! Now login.");
-    showLogin();
-}
-
-function login() {
-    let u = li_username.value.trim();
-    let p = li_password.value.trim();
-
-    let users = JSON.parse(localStorage.getItem("users") || "{}");
-
-    if (!users[u]) {
-        alert("User does not exist!");
-        return;
-    }
-    if (users[u] !== p) {
-        alert("Incorrect password!");
-        return;
-    }
-
-    localStorage.setItem("currentUser", u);
-
-    loginBox.classList.add("hidden");
-    signupBox.classList.add("hidden");
-    app.classList.remove("hidden");
-
-    userDisplay.innerText = u;
-
-    loadHistory();
-}
-
-function logout() {
-    localStorage.removeItem("currentUser");
-    app.classList.add("hidden");
-    showLogin();
-}
-
-/* ---------------------- FACE DETECTION (same as your working code) ---------------------- */
-
+// ------------ Config & state ------------
 const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models/';
+const MAX_DIM = 1300; // image processing max dimension
+const SSD_CONFIDENCE = 0.55;
+const TINY_CONFIDENCE = 0.55;
+
 let processedCanvas = null;
+let processedFilename = '';
+let stream = null;
+let videoEl = null;
+let isWebcamRunning = false;
 
-const uploadEl = document.getElementById("upload");
-const previewImg = document.getElementById("previewImg");
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
+// DOM refs
+const authCard = document.getElementById('authCard');
+const mainApp = document.getElementById('mainApp');
+const userInfo = document.getElementById('userInfo');
+const navBtns = document.getElementById('navBtns');
+const currentUserEl = document.getElementById('currentUser');
+const loginUser = document.getElementById('loginUser');
+const loginPass = document.getElementById('loginPass');
+const loginBtn = document.getElementById('loginBtn');
+const regUser = document.getElementById('regUser');
+const regPass = document.getElementById('regPass');
+const regBtn = document.getElementById('regBtn');
+const authMsg = document.getElementById('authMsg');
+const startCamBtn = document.getElementById('startCamBtn');
+const stopCamBtn = document.getElementById('stopCamBtn');
+const fileInput = document.getElementById('fileInput');
+const detectBtn = document.getElementById('detectBtn');
+const saveAttendanceBtn = document.getElementById('saveAttendanceBtn');
+const previewImg = document.getElementById('previewImg');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const status = document.getElementById('status');
+const countBox = document.getElementById('count');
+const historyList = document.getElementById('historyList');
+const logoutBtn = document.getElementById('logoutBtn');
+const goDashboard = document.getElementById('goDashboard');
+const goHistory = document.getElementById('goHistory');
+const downloadAllPdf = document.getElementById('downloadAllPdf');
+const clearHistoryBtn = document.getElementById('clearHistory');
+const pdfPrefix = document.getElementById('pdfPrefix');
 
-async function loadModels() {
-    await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
-    await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
-}
-loadModels();
-
-uploadEl.addEventListener("change", async e=>{
-    let file = e.target.files[0];
-    let url = URL.createObjectURL(file);
-    previewImg.src = url;
-    previewImg.classList.remove("hidden");
-    await processImage(file);
+// init
+setStatus('Loading models...');
+loadModels().then(()=> {
+  setStatus('Models loaded. You may upload photos or start webcam.');
 });
 
-async function processImage(file) {
-    return new Promise((resolve)=>{
-        let img = new Image();
-        img.src = URL.createObjectURL(file);
-        img.onload = ()=>{
-            let orientation=1;
-            EXIF.getData(file,()=>{orientation=EXIF.getTag(file,"Orientation")||1});
+// ---------- AUTH (local) ----------
+function getUsers() {
+  try { return JSON.parse(localStorage.getItem('afc_users')||'{}'); } catch(e){ return {}; }
+}
+function saveUsers(u){ localStorage.setItem('afc_users', JSON.stringify(u)); }
 
-            let iw=img.width, ih=img.height;
-            const MAX=1500;
-            let scale=Math.min(MAX/Math.max(iw,ih),1);
-            let pw=iw*scale, ph=ih*scale;
-            let swap=(orientation===6||orientation===8);
+regBtn.onclick = () => {
+  const u = regUser.value.trim();
+  const p = regPass.value;
+  if (!u || !p) { authMsg.innerText = "Enter username and password"; return; }
+  const users = getUsers();
+  if (users[u]) { authMsg.innerText = "User exists"; return; }
+  users[u] = { password: p };
+  saveUsers(users);
+  authMsg.innerText = "Registered. You can now login.";
+  regUser.value=''; regPass.value='';
+};
 
-            processedCanvas=document.createElement("canvas");
-            processedCanvas.width=swap?ph:pw;
-            processedCanvas.height=swap?pw:ph;
+loginBtn.onclick = () => {
+  const u = loginUser.value.trim();
+  const p = loginPass.value;
+  const users = getUsers();
+  if (!users[u] || users[u].password !== p) { authMsg.innerText = "Invalid login"; return; }
+  // login
+  sessionStorage.setItem('afc_current_user', u);
+  loginUser.value=''; loginPass.value='';
+  authMsg.innerText = '';
+  showAppForUser(u);
+};
 
-            let pctx=processedCanvas.getContext("2d");
-            pctx.save();
+function logout() {
+  sessionStorage.removeItem('afc_current_user');
+  mainApp.classList.add('hidden');
+  authCard.classList.remove('hidden');
+  userInfo.innerText = 'Not logged in';
+  navBtns.classList.add('hidden');
+  // stop webcam if running
+  stopWebcam();
+}
+logoutBtn.onclick = logout;
 
-            if(orientation===6){pctx.translate(processedCanvas.width,0);pctx.rotate(Math.PI/2);}
-            else if(orientation===8){pctx.translate(0,processedCanvas.height);pctx.rotate(-Math.PI/2);}
-            else if(orientation===3){pctx.translate(processedCanvas.width,processedCanvas.height);pctx.rotate(Math.PI);}
+function showAppForUser(username) {
+  currentUserEl.innerText = username;
+  userInfo.innerText = 'Signed in as ' + username;
+  authCard.classList.add('hidden');
+  mainApp.classList.remove('hidden');
+  navBtns.classList.remove('hidden');
+  updateHistoryList();
+}
 
-            pctx.drawImage(img,0,0,iw,ih,0,0,pw,ph);
-            pctx.restore();
+// Keep logged-in if session exists
+const sessionUser = sessionStorage.getItem('afc_current_user');
+if (sessionUser) showAppForUser(sessionUser);
 
-            ctx.drawImage(processedCanvas,0,0,processedCanvas.width,processedCanvas.height,0,0,canvas.width,canvas.height);
-            resolve();
+// ---------- History storage ----------
+function getHistory() {
+  try { return JSON.parse(localStorage.getItem('afc_history')||'[]'); } catch(e){ return []; }
+}
+function saveHistory(h){ localStorage.setItem('afc_history', JSON.stringify(h)); }
+
+function addHistoryRecord(record) {
+  const h = getHistory();
+  h.unshift(record); // newest first
+  saveHistory(h);
+  updateHistoryList();
+}
+
+function deleteHistoryRecord(id) {
+  let h = getHistory();
+  h = h.filter(r => r.id !== id);
+  saveHistory(h);
+  updateHistoryList();
+}
+
+// ---------- UI history list ----------
+function updateHistoryList() {
+  const h = getHistory();
+  historyList.innerHTML = '';
+  if (h.length === 0) {
+    historyList.innerHTML = '<div class="muted">No history saved yet</div>';
+    return;
+  }
+  h.forEach(rec => {
+    const div = document.createElement('div');
+    div.className = 'hist-row';
+    const img = document.createElement('img'); img.src = rec.dataUrl; img.className = 'thumb';
+    const info = document.createElement('div'); info.style.flex='1';
+    info.innerHTML = `<div><strong>${rec.filename||'photo'}</strong></div>
+      <div class="muted">${new Date(rec.timestamp).toLocaleString()}</div>
+      <div class="muted">Count: ${rec.count}</div>`;
+    const btns = document.createElement('div'); btns.style.display='flex'; btns.style.flexDirection='column';
+    const pdfBtn = document.createElement('button'); pdfBtn.innerText='Download PDF'; pdfBtn.className='btn';
+    pdfBtn.onclick = ()=> downloadPdfRecord(rec);
+    const delBtn = document.createElement('button'); delBtn.innerText='Delete'; delBtn.className='btn';
+    delBtn.onclick = ()=> { if(confirm('Delete record?')) deleteHistoryRecord(rec.id); };
+    btns.appendChild(pdfBtn); btns.appendChild(delBtn);
+    div.appendChild(img); div.appendChild(info); div.appendChild(btns);
+    historyList.appendChild(div);
+  });
+}
+
+// ---------- model loading ----------
+async function loadModels() {
+  try {
+    await Promise.all([
+      faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
+      faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL)
+    ]);
+    console.log('models loaded');
+  } catch (err) { console.error(err); alert('Model load error: ' + err.message); }
+}
+
+// ---------- status helper ----------
+function setStatus(t){ status.innerText = t; console.log('[status]',t); }
+
+// ---------- FILE upload & process ----------
+fileInput.onchange = async (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  processedFilename = f.name;
+  await processImageFileToCanvas(f);
+  setStatus('Image processed. Click Detect.');
+};
+
+async function processImageFileToCanvas(file) {
+  return new Promise((resolve,reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = url;
+    img.onload = () => {
+      try {
+        // read EXIF orientation
+        let orientation = 1;
+        try {
+          EXIF.getData(file, function(){ orientation = EXIF.getTag(this,'Orientation') || 1;});
+        } catch(ex) { orientation = 1; }
+
+        let iw = img.width, ih = img.height;
+        const largest = Math.max(iw, ih);
+        const downscale = (largest > MAX_DIM) ? (MAX_DIM / largest) : 1;
+        const pw = Math.round(iw * downscale);
+        const ph = Math.round(ih * downscale);
+
+        const swap = (orientation === 6 || orientation === 8);
+        const processedW = swap ? ph : pw;
+        const processedH = swap ? pw : ph;
+
+        const pc = document.createElement('canvas');
+        pc.width = processedW; pc.height = processedH;
+        const pctx = pc.getContext('2d');
+
+        pctx.save();
+        if (orientation === 6) {
+          pctx.translate(pc.width, 0); pctx.rotate(Math.PI/2);
+          pctx.drawImage(img, 0, 0, iw, ih, 0, 0, pw, ph);
+        } else if (orientation === 8) {
+          pctx.translate(0, pc.height); pctx.rotate(-Math.PI/2);
+          pctx.drawImage(img, 0, 0, iw, ih, 0, 0, pw, ph);
+        } else if (orientation === 3) {
+          pctx.translate(pc.width, pc.height); pctx.rotate(Math.PI);
+          pctx.drawImage(img, 0,0, iw, ih, 0,0, pw, ph);
+        } else {
+          pctx.drawImage(img, 0,0, iw, ih, 0,0, pw, ph);
         }
-    });
+        pctx.restore();
+
+        processedCanvas = pc;
+        // fit visible canvas
+        canvas.width = pc.width; canvas.height = pc.height;
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        ctx.drawImage(processedCanvas, 0,0);
+        URL.revokeObjectURL(url);
+        resolve();
+      } catch (err) { URL.revokeObjectURL(url); reject(err); }
+    };
+    img.onerror = (err) => { URL.revokeObjectURL(url); reject(err); };
+  });
 }
 
-async function detectFromImage() {
-    if (!processedCanvas) return alert("Upload an image first");
+// ---------- DETECTION ----------
+detectBtn.onclick = async () => {
+  if (!processedCanvas) { alert('Upload image first'); return; }
+  setStatus('Detecting (SSD)...'); countBox.innerText = 'Faces: ...';
+  let detections = await faceapi.detectAllFaces(processedCanvas, new faceapi.SsdMobilenetv1Options({ minConfidence: SSD_CONFIDENCE }));
+  if (detections.length === 0) {
+    setStatus('No SSD detections — trying Tiny fallback...');
+    detections = await faceapi.detectAllFaces(processedCanvas, new faceapi.TinyFaceDetectorOptions({ scoreThreshold: TINY_CONFIDENCE }));
+  }
+  drawDetectionsOnCanvas(detections);
+  setStatus('Detection done.');
+  countBox.innerText = 'Faces: ' + detections.length;
+};
 
-    let faces = await faceapi.detectAllFaces(processedCanvas,new faceapi.SsdMobilenetv1Options({minConfidence:0.25}));
-    if(faces.length===0){
-        faces = await faceapi.detectAllFaces(processedCanvas,new faceapi.TinyFaceDetectorOptions({scoreThreshold:0.2}));
+// draw boxes scaled correctly (processedCanvas -> visible canvas mapping is 1:1 because we set canvas size to processedCanvas)
+function drawDetectionsOnCanvas(dets) {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(processedCanvas, 0,0);
+  ctx.strokeStyle = 'lime'; ctx.lineWidth = Math.max(2, Math.round(canvas.width/300));
+  ctx.font = `${Math.max(12, Math.round(canvas.width/80))}px Arial`; ctx.fillStyle = 'lime';
+  dets.forEach(d => {
+    const b = d.box;
+    ctx.strokeRect(b.x, b.y, b.width, b.height);
+    const score = Array.isArray(d.score) ? d.score[0] : (d.score || d.confidence || 0);
+    ctx.fillText(Math.round(score*100) + '%', b.x, Math.max(12, b.y - 6));
+  });
+}
+
+// ---------- SAVE attendance ----------
+saveAttendanceBtn.onclick = async () => {
+  if (!processedCanvas) { alert('Please upload and detect first'); return; }
+  // capture thumbnail as dataURL (downscale to thumbnail size)
+  const thumbW = 320;
+  const thumbH = Math.round(processedCanvas.height * (thumbW / processedCanvas.width));
+  const tcanvas = document.createElement('canvas'); tcanvas.width = thumbW; tcanvas.height = thumbH;
+  tcanvas.getContext('2d').drawImage(processedCanvas, 0,0, processedCanvas.width, processedCanvas.height, 0,0, thumbW, thumbH);
+  const dataUrl = tcanvas.toDataURL('image/jpeg', 0.85);
+
+  // count from current canvas text (we stored in countBox)
+  const countText = countBox.innerText || 'Faces: 0';
+  const count = parseInt(countText.replace(/\D/g,'')) || 0;
+
+  const rec = {
+    id: 'rec_' + Date.now(),
+    user: sessionStorage.getItem('afc_current_user') || 'unknown',
+    timestamp: Date.now(),
+    count,
+    filename: processedFilename || 'photo',
+    dataUrl
+  };
+  addHistoryRecord(rec);
+  alert('Attendance saved');
+};
+
+// ---------- PDF generation ----------
+async function downloadPdfRecord(rec) {
+  // build pdf: render the stored dataUrl image into canvas/pdf
+  const img = new Image(); img.src = rec.dataUrl;
+  await new Promise(res => img.onload = res);
+  // use html2canvas to capture the image + overlay text
+  const wrapper = document.createElement('div');
+  wrapper.style.width = img.width + 'px';
+  wrapper.style.background = '#fff'; wrapper.style.color='#000'; wrapper.style.padding='10px';
+  const imgEl = document.createElement('img'); imgEl.src = rec.dataUrl; imgEl.style.maxWidth='100%';
+  wrapper.appendChild(imgEl);
+  const text = document.createElement('div'); text.style.marginTop='8px';
+  text.innerHTML = `<strong>Filename:</strong> ${rec.filename}<br><strong>Count:</strong> ${rec.count}<br><strong>Date:</strong> ${new Date(rec.timestamp).toLocaleString()}`;
+  wrapper.appendChild(text);
+  document.body.appendChild(wrapper);
+  const canvasSnapshot = await html2canvas(wrapper, { scale: 1.5, useCORS: true });
+  document.body.removeChild(wrapper);
+  const imgData = canvasSnapshot.toDataURL('image/jpeg', 0.95);
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({ orientation:'landscape', unit:'px', format:[canvasSnapshot.width, canvasSnapshot.height] });
+  pdf.addImage(imgData, 'JPEG', 0, 0, canvasSnapshot.width, canvasSnapshot.height);
+  const prefix = (pdfPrefix && pdfPrefix.value) ? pdfPrefix.value.trim() : 'attendance';
+  pdf.save(`${prefix}_${rec.id}.pdf`);
+}
+
+// download all history PDFs as zip (or sequential downloads)
+downloadAllPdf.onclick = async () => {
+  const h = getHistory();
+  if (h.length === 0) { alert('No history'); return; }
+  for (const rec of h) {
+    // download sequentially
+    await downloadPdfRecord(rec);
+    await new Promise(r => setTimeout(r, 400));
+  }
+};
+
+// clear history
+clearHistoryBtn.onclick = () => {
+  if (!confirm('Clear all history?')) return;
+  localStorage.removeItem('afc_history');
+  updateHistoryList();
+};
+
+// ---------- Webcam support ----------
+startCamBtn.onclick = async () => {
+  if (isWebcamRunning) return;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    if (!videoEl) {
+      videoEl = document.createElement('video');
+      videoEl.autoplay = true;
+      videoEl.muted = true;
+      videoEl.playsInline = true;
+      videoEl.style.display = 'none';
+      document.body.appendChild(videoEl);
     }
-    drawFaces(faces);
-}
-
-function drawFaces(faces){
-    ctx.drawImage(processedCanvas,0,0,processedCanvas.width,processedCanvas.height,0,0,canvas.width,canvas.height);
-
-    ctx.strokeStyle="lime";
-    ctx.lineWidth=3;
-    ctx.font="20px Arial";
-    ctx.fillStyle="yellow";
-
-    let s=canvas.width/processedCanvas.width;
-
-    faces.forEach(f=>{
-        let b=f.box;
-        let x=b.x*s, y=b.y*s, w=b.width*s, h=b.height*s;
-        ctx.strokeRect(x,y,w,h);
-        ctx.fillText(Math.round(f.score*100)+"%",x,y-5);
-    });
-
-    document.getElementById("countBox").innerText="Faces: "+faces.length;
-}
-
-/* ---------------------- WEBCAM ---------------------- */
-
-let videoStream;
-let videoElem=document.createElement("video");
-videoElem.autoplay=true; videoElem.muted=true;
-
-async function startWebcam(){
-    videoStream=await navigator.mediaDevices.getUserMedia({video:true});
-    videoElem.srcObject=videoStream;
-    webcamLoop();
-}
-
-function stopWebcam(){
-    if(videoStream){
-        videoStream.getTracks().forEach(t=>t.stop());
-    }
-}
-
-function webcamLoop(){
-    if(!videoElem.srcObject) return;
-    ctx.drawImage(videoElem,0,0,canvas.width,canvas.height);
+    videoEl.srcObject = stream;
+    await videoEl.play();
+    isWebcamRunning = true;
+    setStatus('Webcam running — detecting live frames');
     requestAnimationFrame(webcamLoop);
+  } catch (err) {
+    alert('Cannot start webcam: ' + err.message);
+  }
+};
+
+stopCamBtn.onclick = () => {
+  stopWebcam();
+};
+
+function stopWebcam() {
+  if (stream) stream.getTracks().forEach(t=>t.stop());
+  isWebcamRunning = false;
+  setStatus('Webcam stopped');
 }
 
-/* ---------------------- SAVE HISTORY ---------------------- */
+async function webcamLoop() {
+  if (!isWebcamRunning || !videoEl) return;
+  // draw scaled video into canvas
+  const vw = videoEl.videoWidth || 640, vh = videoEl.videoHeight || 480;
+  const scale = Math.min(canvas.width / vw, canvas.height / vh);
+  const dw = Math.round(vw * scale), dh = Math.round(vh * scale);
+  const dx = Math.round((canvas.width - dw) / 2), dy = Math.round((canvas.height - dh) / 2);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(videoEl, 0,0, vw, vh, dx, dy, dw, dh);
 
-function saveResult(){
-    let u=localStorage.getItem("currentUser");
-    let list=JSON.parse(localStorage.getItem("history_"+u)||"[]");
-
-    list.push({
-        faces: document.getElementById("countBox").innerText,
-        time: new Date().toLocaleString()
-    });
-
-    localStorage.setItem("history_"+u,JSON.stringify(list));
-    loadHistory();
+  try {
+    const detections = await faceapi.detectAllFaces(canvas, new faceapi.SsdMobilenetv1Options({ minConfidence: SSD_CONFIDENCE }));
+    drawDetectionsOnCanvas(detections);
+    countBox.innerText = 'Faces: ' + detections.length;
+  } catch (err) {
+    console.error('webcam detect err', err);
+  }
+  requestAnimationFrame(webcamLoop);
 }
 
-function loadHistory(){
-    let u=localStorage.getItem("currentUser");
-    let list=JSON.parse(localStorage.getItem("history_"+u)||"[]");
+// ---------- navigation buttons ----------
+goDashboard.onclick = () => { mainApp.scrollIntoView(); };
+goHistory.onclick = () => { historyList.scrollIntoView(); };
 
-    let box=document.getElementById("historyBox");
-    box.innerHTML="";
-    list.forEach(i=>{
-        box.innerHTML+=`<div>📌 ${i.time} — ${i.faces}</div>`;
-    });
+// if logged in on load show app
+if (sessionStorage.getItem('afc_current_user')) {
+  navBtns.classList.remove('hidden');
+  userInfo.innerText = 'Signed in as ' + sessionStorage.getItem('afc_current_user');
 }
 
-/* ---------------------- PDF DOWNLOAD ---------------------- */
-
-async function downloadPDF(){
-    const {jsPDF}=window.jspdf;
-    let pdf=new jsPDF();
-
-    pdf.text("Face Detection Report",10,20);
-    pdf.text("User: "+localStorage.getItem("currentUser"),10,30);
-    pdf.text("Faces: "+document.getElementById("countBox").innerText,10,40);
-    pdf.text("Time: "+new Date().toLocaleString(),10,50);
-
-    let imgData=canvas.toDataURL("image/jpeg",1.0);
-    pdf.addImage(imgData,"JPEG",10,60,180,120);
-
-    pdf.save("Face_Report.pdf");
+// ---------- helper: draw detections on current visible canvas (uses processedCanvas in upload, or canvas for webcam) ----------
+function drawDetectionsOnCanvas(dets) {
+  // when processedCanvas exists and canvas sized to it, use straightforward mapping
+  ctx.drawImage(processedCanvas || canvas, 0,0);
+  ctx.strokeStyle = 'lime'; ctx.lineWidth = Math.max(2, Math.round(canvas.width/300));
+  ctx.font = `${Math.max(12, Math.round(canvas.width/80))}px Arial`; ctx.fillStyle = 'lime';
+  dets.forEach(d => {
+    const b = d.box;
+    ctx.strokeRect(b.x, b.y, b.width, b.height);
+    const score = Array.isArray(d.score) ? d.score[0] : (d.score || d.confidence || 0);
+    ctx.fillText(Math.round(score * 100) + '%', b.x, Math.max(12, b.y - 6));
+  });
 }
+
+// ---------- utility: auto-login demo (optional) ----------
+/* Uncomment to pre-create demo user
+const users = getUsers();
+users['admin'] = { password: '1234' };
+saveUsers(users);
+sessionStorage.setItem('afc_current_user','admin');
+showAppForUser('admin');
+*/
 
 </script>
 </body>
