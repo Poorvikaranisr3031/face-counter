@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Face Counter App – Login + Signup + Detection + Save + PDF</title>
+
+<!-- face-api.js -->
+<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+
+<!-- EXIF for rotation -->
+<script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
+
+<!-- jsPDF for PDF download -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<style>
+    body { background:#111; color:#fff; font-family:Arial; text-align:center; padding:20px; }
+    .box {
+        width:320px; margin:40px auto; padding:20px;
+        background:#222; border-radius:10px; box-shadow:0 0 10px #000;
+    }
+    input {
+        width:90%; padding:10px; margin:10px;
+        border-radius:5px; border:none; font-size:16px;
+    }
+    button {
+        padding:10px 16px; margin:6px; border-radius:6px;
+        border:none; cursor:pointer; background:#008cff; color:#fff;
+        font-size:16px;
+    }
+    #canvas, #previewImg {
+        border:2px solid #ccc; border-radius:10px; margin-top:10px;
+        max-width:95%;
+    }
+    #historyBox {
+        margin-top:20px;
+        text-align:left;
+        background:#222;
+        padding:12px;
+        border-radius:10px;
+        width:90%;
+        max-width:600px;
+        margin-left:auto; margin-right:auto;
+        max-height:250px;
+        overflow:auto;
+    }
+    .hidden { display:none; }
+</style>
+</head>
+<body>
+
+<!-- SIGNUP BOX -->
+<div id="signupBox" class="box">
+    <h2>Signup</h2>
+    <input id="su_username" placeholder="Create username">
+    <input id="su_password" placeholder="Create password" type="password">
+    <button onclick="signup()">Signup</button>
+    <p>Already have an account? <a href="#" onclick="showLogin()">Login</a></p>
+</div>
+
+<!-- LOGIN BOX -->
+<div id="loginBox" class="box hidden">
+    <h2>Login</h2>
+    <input id="li_username" placeholder="Username">
+    <input id="li_password" placeholder="Password" type="password">
+    <button onclick="login()">Login</button>
+    <p>No account? <a href="#" onclick="showSignup()">Signup</a></p>
+</div>
+
+<!-- MAIN APP -->
+<div id="app" class="hidden">
+
+    <h2>Welcome, <span id="userDisplay"></span></h2>
+    <button onclick="logout()" style="background:#ff4444">Logout</button>
+
+    <div class="controls">
+        <button onclick="startWebcam()">Start Webcam</button>
+        <button onclick="stopWebcam()">Stop Webcam</button>
+        <input id="upload" type="file" accept="image/*">
+        <button onclick="detectFromImage()">Detect Faces</button>
+        <button onclick="saveResult()">Save</button>
+        <button onclick="downloadPDF()">Download PDF</button>
+    </div>
+
+    <img id="previewImg" class="hidden" />
+    <canvas id="canvas" width="640" height="480"></canvas>
+
+    <div id="countBox">Faces: 0</div>
+
+    <h3>Saved History</h3>
+    <div id="historyBox"></div>
+</div>
+
+
+<script>
+/* ---------------------- SIGNUP + LOGIN + LOGOUT ---------------------- */
+
+function showSignup() {
+    document.getElementById("signupBox").classList.remove("hidden");
+    document.getElementById("loginBox").classList.add("hidden");
+}
+
+function showLogin() {
+    document.getElementById("loginBox").classList.remove("hidden");
+    document.getElementById("signupBox").classList.add("hidden");
+}
+
+function signup() {
+    let u = su_username.value.trim();
+    let p = su_password.value.trim();
+
+    if (u=="" || p=="") {
+        alert("Enter username & password");
+        return;
+    }
+
+    let users = JSON.parse(localStorage.getItem("users") || "{}");
+
+    if (users[u]) {
+        alert("Username already exists!");
+        return;
+    }
+
+    users[u] = p; // store password
+    localStorage.setItem("users", JSON.stringify(users));
+
+    alert("Signup successful! Now login.");
+    showLogin();
+}
+
+function login() {
+    let u = li_username.value.trim();
+    let p = li_password.value.trim();
+
+    let users = JSON.parse(localStorage.getItem("users") || "{}");
+
+    if (!users[u]) {
+        alert("User does not exist!");
+        return;
+    }
+    if (users[u] !== p) {
+        alert("Incorrect password!");
+        return;
+    }
+
+    localStorage.setItem("currentUser", u);
+
+    loginBox.classList.add("hidden");
+    signupBox.classList.add("hidden");
+    app.classList.remove("hidden");
+
+    userDisplay.innerText = u;
+
+    loadHistory();
+}
+
+function logout() {
+    localStorage.removeItem("currentUser");
+    app.classList.add("hidden");
+    showLogin();
+}
+
+/* ---------------------- FACE DETECTION (same as your working code) ---------------------- */
+
+const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models/';
+let processedCanvas = null;
+
+const uploadEl = document.getElementById("upload");
+const previewImg = document.getElementById("previewImg");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+async function loadModels() {
+    await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
+    await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+}
+loadModels();
+
+uploadEl.addEventListener("change", async e=>{
+    let file = e.target.files[0];
+    let url = URL.createObjectURL(file);
+    previewImg.src = url;
+    previewImg.classList.remove("hidden");
+    await processImage(file);
+});
+
+async function processImage(file) {
+    return new Promise((resolve)=>{
+        let img = new Image();
+        img.src = URL.createObjectURL(file);
+        img.onload = ()=>{
+            let orientation=1;
+            EXIF.getData(file,()=>{orientation=EXIF.getTag(file,"Orientation")||1});
+
+            let iw=img.width, ih=img.height;
+            const MAX=1500;
+            let scale=Math.min(MAX/Math.max(iw,ih),1);
+            let pw=iw*scale, ph=ih*scale;
+            let swap=(orientation===6||orientation===8);
+
+            processedCanvas=document.createElement("canvas");
+            processedCanvas.width=swap?ph:pw;
+            processedCanvas.height=swap?pw:ph;
+
+            let pctx=processedCanvas.getContext("2d");
+            pctx.save();
+
+            if(orientation===6){pctx.translate(processedCanvas.width,0);pctx.rotate(Math.PI/2);}
+            else if(orientation===8){pctx.translate(0,processedCanvas.height);pctx.rotate(-Math.PI/2);}
+            else if(orientation===3){pctx.translate(processedCanvas.width,processedCanvas.height);pctx.rotate(Math.PI);}
+
+            pctx.drawImage(img,0,0,iw,ih,0,0,pw,ph);
+            pctx.restore();
+
+            ctx.drawImage(processedCanvas,0,0,processedCanvas.width,processedCanvas.height,0,0,canvas.width,canvas.height);
+            resolve();
+        }
+    });
+}
+
+async function detectFromImage() {
+    if (!processedCanvas) return alert("Upload an image first");
+
+    let faces = await faceapi.detectAllFaces(processedCanvas,new faceapi.SsdMobilenetv1Options({minConfidence:0.25}));
+    if(faces.length===0){
+        faces = await faceapi.detectAllFaces(processedCanvas,new faceapi.TinyFaceDetectorOptions({scoreThreshold:0.2}));
+    }
+    drawFaces(faces);
+}
+
+function drawFaces(faces){
+    ctx.drawImage(processedCanvas,0,0,processedCanvas.width,processedCanvas.height,0,0,canvas.width,canvas.height);
+
+    ctx.strokeStyle="lime";
+    ctx.lineWidth=3;
+    ctx.font="20px Arial";
+    ctx.fillStyle="yellow";
+
+    let s=canvas.width/processedCanvas.width;
+
+    faces.forEach(f=>{
+        let b=f.box;
+        let x=b.x*s, y=b.y*s, w=b.width*s, h=b.height*s;
+        ctx.strokeRect(x,y,w,h);
+        ctx.fillText(Math.round(f.score*100)+"%",x,y-5);
+    });
+
+    document.getElementById("countBox").innerText="Faces: "+faces.length;
+}
+
+/* ---------------------- WEBCAM ---------------------- */
+
+let videoStream;
+let videoElem=document.createElement("video");
+videoElem.autoplay=true; videoElem.muted=true;
+
+async function startWebcam(){
+    videoStream=await navigator.mediaDevices.getUserMedia({video:true});
+    videoElem.srcObject=videoStream;
+    webcamLoop();
+}
+
+function stopWebcam(){
+    if(videoStream){
+        videoStream.getTracks().forEach(t=>t.stop());
+    }
+}
+
+function webcamLoop(){
+    if(!videoElem.srcObject) return;
+    ctx.drawImage(videoElem,0,0,canvas.width,canvas.height);
+    requestAnimationFrame(webcamLoop);
+}
+
+/* ---------------------- SAVE HISTORY ---------------------- */
+
+function saveResult(){
+    let u=localStorage.getItem("currentUser");
+    let list=JSON.parse(localStorage.getItem("history_"+u)||"[]");
+
+    list.push({
+        faces: document.getElementById("countBox").innerText,
+        time: new Date().toLocaleString()
+    });
+
+    localStorage.setItem("history_"+u,JSON.stringify(list));
+    loadHistory();
+}
+
+function loadHistory(){
+    let u=localStorage.getItem("currentUser");
+    let list=JSON.parse(localStorage.getItem("history_"+u)||"[]");
+
+    let box=document.getElementById("historyBox");
+    box.innerHTML="";
+    list.forEach(i=>{
+        box.innerHTML+=`<div>📌 ${i.time} — ${i.faces}</div>`;
+    });
+}
+
+/* ---------------------- PDF DOWNLOAD ---------------------- */
+
+async function downloadPDF(){
+    const {jsPDF}=window.jspdf;
+    let pdf=new jsPDF();
+
+    pdf.text("Face Detection Report",10,20);
+    pdf.text("User: "+localStorage.getItem("currentUser"),10,30);
+    pdf.text("Faces: "+document.getElementById("countBox").innerText,10,40);
+    pdf.text("Time: "+new Date().toLocaleString(),10,50);
+
+    let imgData=canvas.toDataURL("image/jpeg",1.0);
+    pdf.addImage(imgData,"JPEG",10,60,180,120);
+
+    pdf.save("Face_Report.pdf");
+}
+
+</script>
+</body>
+</html>
